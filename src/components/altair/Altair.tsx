@@ -13,20 +13,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { type FunctionDeclaration, SchemaType } from "@google/generative-ai";
+import { type FunctionDeclaration,Type } from "@google/genai";
 import { useEffect, useRef, useState, memo } from "react";
 import vegaEmbed from "vega-embed";
 import { useLiveAPIContext } from "../../contexts/LiveAPIContext";
-import { ToolCall } from "../../multimodal-live-types";
+import { ToolCall } from "../../lib/multimodal-live-client";
+
 
 const declaration: FunctionDeclaration = {
   name: "render_altair",
   description: "Displays an altair graph in json format.",
   parameters: {
-    type: SchemaType.OBJECT,
+    type:Type.OBJECT,
     properties: {
       json_graph: {
-        type: SchemaType.STRING,
+        type: Type.STRING,
         description:
           "JSON STRING representation of the graph to render. Must be a string, not a json object",
       },

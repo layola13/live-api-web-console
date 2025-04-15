@@ -16,7 +16,7 @@
 
 import "./logger.scss";
 
-import { Part } from "@google/generative-ai";
+import { Part } from "@google/genai"; // 修改导入源
 import cn from "classnames";
 import { ReactNode } from "react";
 import { useLoggerStore } from "../../lib/store-logger";
@@ -38,7 +38,7 @@ import {
   ToolCallCancellationMessage,
   ToolCallMessage,
   ToolResponseMessage,
-} from "../../multimodal-live-types";
+} from "../../lib/multimodal-live-client";
 
 const formatTime = (d: Date) => d.toLocaleTimeString().slice(0, -3);
 
@@ -93,31 +93,42 @@ function tryParseCodeExecutionResult(output: string) {
   }
 }
 
-const RenderPart = ({ part }: { part: Part }) =>
-  part.text && part.text.length ? (
-    <p className="part part-text">{part.text}</p>
-  ) : part.executableCode ? (
-    <div className="part part-executableCode">
-      <h5>executableCode: {part.executableCode.language}</h5>
-      <SyntaxHighlighter
-        language={part.executableCode.language.toLowerCase()}
-        style={dark}
-      >
-        {part.executableCode.code}
-      </SyntaxHighlighter>
-    </div>
-  ) : part.codeExecutionResult ? (
-    <div className="part part-codeExecutionResult">
-      <h5>codeExecutionResult: {part.codeExecutionResult.outcome}</h5>
-      <SyntaxHighlighter language="json" style={dark}>
-        {tryParseCodeExecutionResult(part.codeExecutionResult.output)}
-      </SyntaxHighlighter>
-    </div>
-  ) : (
-    <div className="part part-inlinedata">
-      <h5>Inline Data: {part.inlineData?.mimeType}</h5>
-    </div>
-  );
+// 更新 RenderPart 组件以处理 @google/genai 的 Part 类型
+const RenderPart = ({ part }: { part: Part }) => {
+  if (part.text) {
+    return <p className="part part-text">{part.text}</p>;
+  } else if (part.executableCode) {
+    return (
+      <div className="part part-executableCode">
+        <h5>executableCode: {part.executableCode.language}</h5>
+        <SyntaxHighlighter
+          language={part.executableCode.language?.toLowerCase() || 'text'}
+          style={dark}
+        >
+          {part.executableCode.code || ''}
+        </SyntaxHighlighter>
+      </div>
+    );
+  } else if (part.codeExecutionResult) {
+    return (
+      <div className="part part-codeExecutionResult">
+        <h5>codeExecutionResult: {part.codeExecutionResult.outcome}</h5>
+        <SyntaxHighlighter language="json" style={dark}>
+          {tryParseCodeExecutionResult(part.codeExecutionResult.output || '') || ''}
+        </SyntaxHighlighter>
+      </div>
+    );
+  } else if (part.inlineData) {
+    return (
+      <div className="part part-inlinedata">
+        <h5>Inline Data: {part.inlineData.mimeType}</h5>
+      </div>
+    );
+  }
+  
+  // 默认情况
+  return <div className="part part-unknown">[Unknown part type]</div>;
+};
 
 const ClientContentLog = ({ message }: Message) => {
   const { turns, turnComplete } = (message as ClientContentMessage)
@@ -127,10 +138,10 @@ const ClientContentLog = ({ message }: Message) => {
       <h4 className="roler-user">User</h4>
       {turns.map((turn, i) => (
         <div key={`message-turn-${i}`}>
-          {turn.parts
-            .filter((part) => !(part.text && part.text === "\n"))
+          {/* 添加 ?. 操作符来处理可能为 undefined 的情况 */}
+          {turn.parts?.filter((part) => !(part.text && part.text === "\n"))
             .map((part, j) => (
-              <RenderPart part={part} key={`message-turh-${i}-part-${j}`} />
+              <RenderPart part={part} key={`message-turn-${i}-part-${j}`} />
             ))}
         </div>
       ))}
@@ -147,7 +158,7 @@ const ToolCallLog = ({ message }: Message) => {
         <div key={fc.id} className="part part-functioncall">
           <h5>Function call: {fc.name}</h5>
           <SyntaxHighlighter language="json" style={dark}>
-            {JSON.stringify(fc, null, "  ")}
+            {JSON.stringify(fc, null, "  ") || ''}
           </SyntaxHighlighter>
         </div>
       ))}
@@ -178,7 +189,7 @@ const ToolResponseLog = ({ message }: Message): JSX.Element => (
         <div key={`tool-response-${fc.id}`} className="part">
           <h5>Function Response: {fc.id}</h5>
           <SyntaxHighlighter language="json" style={dark}>
-            {JSON.stringify(fc.response, null, "  ")}
+            {JSON.stringify(fc.response, null, "  ") || ''}
           </SyntaxHighlighter>
         </div>
       ),
@@ -194,6 +205,7 @@ const ModelTurnLog = ({ message }: Message): JSX.Element => {
   return (
     <div className="rich-log model-turn model">
       <h4 className="role-model">Model</h4>
+      {/* 添加类型检查和安全访问 */}
       {parts
         .filter((part) => !(part.text && part.text === "\n"))
         .map((part, j) => (

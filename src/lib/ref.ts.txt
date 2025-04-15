@@ -1,0 +1,399 @@
+/**
+ * Copyright 2024 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import { EventEmitter } from "eventemitter3";
+import { difference } from "lodash";
+import {
+  GoogleGenAI,
+  Session,
+  Content,
+  Part,
+  Blob as GenAIBlob,
+  LiveServerMessage,
+  LiveServerContent,
+  Modality,
+} from "@google/genai";
+import {
+  ClientContentMessage,
+  isInterrupted,
+  isModelTurn,
+  isServerContentMessage,
+  isSetupCompleteMessage,
+  isToolCallCancellationMessage,
+  isToolCallMessage,
+  isTurnComplete,
+  LiveIncomingMessage,
+  ModelTurn,
+  RealtimeInputMessage,
+  ServerContent,
+  SetupMessage,
+  StreamingLog,
+  ToolCall,
+  ToolCallCancellation,
+  ToolResponseMessage,
+  type LiveConfig,
+} from "../multimodal-live-types";
+import { base64ToArrayBuffer } from "./utils";
+
+/**
+ * the events that this client will emit
+ */
+interface MultimodalLiveClientEventTypes {
+  open: () => void;
+  log: (log: StreamingLog) => void;
+  close: (event: CloseEvent) => void;
+  audio: (data: ArrayBuffer) => void;
+  content: (data: ServerContent) => void;
+  interrupted: () => void;
+  setupcomplete: () => void;
+  turncomplete: () => void;
+  toolcall: (toolCall: ToolCall) => void;
+  toolcallcancellation: (toolcallCancellation: ToolCallCancellation) => void;
+}
+
+export type MultimodalLiveAPIClientConnection = {
+  url?: string;
+  apiKey: string;
+};
+
+/**
+ * A event-emitting class that manages the connection to the Gemini AI service and emits
+ * events to the rest of the application.
+ * If you dont want to use react you can still use this.
+ */
+export class MultimodalLiveClient extends EventEmitter<MultimodalLiveClientEventTypes> {
+  private genAI: GoogleGenAI;
+  private session: Session | null = null;
+  protected config: LiveConfig | null = null;
+
+  public getConfig() {
+    return { ...this.config };
+  }
+
+  constructor({ apiKey }: MultimodalLiveAPIClientConnection) {
+    super();
+    this.genAI = new GoogleGenAI({ apiKey });
+    this.send = this.send.bind(this);
+  }
+
+  log(type: string, message: StreamingLog["message"]) {
+    const log: StreamingLog = {
+      date: new Date(),
+      type,
+      message,
+    };
+    this.emit("log", log);
+  }
+
+  async connect(config: LiveConfig): Promise<boolean> {
+    this.config = config;
+
+    try {
+      // 使用 GoogleGenAI 的 live 接口替代直接的 WebSocket 连接
+      this.session = await this.genAI.live.connect({
+        model: config.model,
+        config: {
+          systemInstruction: config.systemInstruction,
+          tools: config.tools,
+          responseModalities: config.generationConfig?.responseModalities?.map(
+            (m) => m as Modality
+          ) || [Modality.TEXT],
+          realtimeInputConfig: config.realtimeInputConfig,
+          speechConfig: config.speechConfig,
+          generationConfig: config.generationConfig,
+          contextWindowCompression: config.contextWindowCompression,
+          sessionResumption: config.sessionResumption,
+        },
+        callbacks: {
+          onopen: () => {
+            this.log("client.open", "connected to socket");
+            this.emit("open");
+            // 模拟原始代码中的 setup 消息日志
+            this.log("client.send", "setup");
+          },
+          onmessage: (message: LiveServerMessage) => {
+            this.handleServerMessage(message);
+          },
+          onerror: (e: ErrorEvent) => {
+            const message = `Could not connect to the service`;
+            this.log(`server.${e.type}`, message);
+          },
+          onclose: (e: CloseEvent) => {
+            let reason = e.reason || "";
+            if (reason.toLowerCase().includes("error")) {
+              const prelude = "ERROR]";
+              const preludeIndex = reason.indexOf(prelude);
+              if (preludeIndex > 0) {
+                reason = reason.slice(
+                  preludeIndex + prelude.length + 1,
+                  Infinity
+                );
+              }
+            }
+            this.log(
+              `server.close`,
+              `disconnected ${reason ? `with reason: ${reason}` : ""}`
+            );
+            this.emit("close", e);
+            this.session = null;
+          },
+        },
+      });
+
+      return true;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.log("server.error", `Connection error: ${errorMessage}`);
+      throw new Error(`Could not connect: ${errorMessage}`);
+    }
+  }
+
+  disconnect(): boolean {
+    if (this.session) {
+      this.session.close();
+      this.session = null;
+      this.log("client.close", "Disconnected");
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * 处理从服务器收到的消息
+   */
+  private handleServerMessage(message: LiveServerMessage) {
+    // 处理设置完成消息
+    if (message.setupComplete) {
+      this.log("server.send", "setupComplete");
+      this.emit("setupcomplete");
+      return;
+    }
+
+    // 处理工具调用消息
+    if (message.toolCall) {
+      const toolCall: ToolCall = {
+        functionCalls: message.toolCall.functionCalls?.map((fc) => ({
+          id: fc.id,
+          name: fc.name,
+          args: fc.args,
+        })) || [],
+      };
+      this.log("server.toolCall", { toolCall });
+      this.emit("toolcall", toolCall);
+      return;
+    }
+
+    // 处理工具调用取消消息
+    if (message.toolCallCancellation) {
+      const toolCallCancellation: ToolCallCancellation = {
+        ids: message.toolCallCancellation.ids || [],
+      };
+      this.log("receive.toolCallCancellation", { toolCallCancellation });
+      this.emit("toolcallcancellation", toolCallCancellation);
+      return;
+    }
+
+    // 处理内容消息
+    if (message.content) {
+      const serverContent = this.mapToServerContent(message.content);
+      
+      if (isInterrupted(serverContent)) {
+        this.log("receive.serverContent", "interrupted");
+        this.emit("interrupted");
+        return;
+      }
+      
+      if (isTurnComplete(serverContent)) {
+        this.log("server.send", "turnComplete");
+        this.emit("turncomplete");
+      }
+
+      if (isModelTurn(serverContent)) {
+        let parts: Part[] = serverContent.modelTurn.parts;
+
+        // 处理音频部分
+        const audioParts = parts.filter(
+          (p) => p.inlineData && p.inlineData.mimeType.startsWith("audio/pcm")
+        );
+        const base64s = audioParts.map((p) => p.inlineData?.data);
+
+        // 从模型回合中移除音频部分
+        const otherParts = difference(parts, audioParts);
+
+        // 处理音频数据
+        base64s.forEach((b64) => {
+          if (b64) {
+            const data = base64ToArrayBuffer(b64);
+            this.emit("audio", data);
+            this.log("server.audio", `buffer (${data.byteLength})`);
+          }
+        });
+        
+        if (!otherParts.length) {
+          return;
+        }
+
+        parts = otherParts;
+
+        const content: ModelTurn = { modelTurn: { parts } };
+        this.emit("content", content);
+        this.log("server.content", { serverContent: content });
+      }
+    }
+  }
+
+  /**
+   * 将 LiveServerContent 转换为 ServerContent
+   */
+  private mapToServerContent(content: LiveServerContent): ServerContent {
+    if (content.interrupted) {
+      return { interrupted: true };
+    }
+    
+    if (content.turnComplete) {
+      return { end_of_turn: true };
+    }
+    
+    if (content.modelTurn) {
+      return {
+        modelTurn: {
+          parts: content.modelTurn.parts || []
+        }
+      };
+    }
+    
+    return {} as ServerContent;
+  }
+
+  /**
+   * 发送实时输入，例如音频/视频流
+   */
+  sendRealtimeInput(chunks: GenAIBlob[]) {
+    if (!this.session) {
+      throw new Error("Session is not connected");
+    }
+    
+    let hasAudio = false;
+    let hasVideo = false;
+    for (let i = 0; i < chunks.length; i++) {
+      const ch = chunks[i];
+      if (ch.mimeType.includes("audio")) {
+        hasAudio = true;
+      }
+      if (ch.mimeType.includes("image")) {
+        hasVideo = true;
+      }
+      if (hasAudio && hasVideo) {
+        break;
+      }
+    }
+    
+    const message =
+      hasAudio && hasVideo
+        ? "audio + video"
+        : hasAudio
+          ? "audio"
+          : hasVideo
+            ? "video"
+            : "unknown";
+    
+    try {
+      this.session.sendRealtimeInput({ mediaChunks: chunks });
+      this.log('client.realtimeInput', message);
+    } catch (error) {
+      console.error('Error sending realtime input:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 发送工具响应
+   */
+  sendToolResponse(toolResponse: ToolResponseMessage["toolResponse"]) {
+    if (!this.session) {
+      throw new Error("Session is not connected");
+    }
+    
+    try {
+      this.session.sendToolResponse({
+        functionResponses: toolResponse.functionResponses
+      });
+      this.log('client.toolResponse', { toolResponse });
+    } catch (error) {
+      console.error('Error sending tool response:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 发送普通内容
+   */
+  send(parts: Part | Part[], turnComplete: boolean = true) {
+    if (!this.session) {
+      throw new Error("Session is not connected");
+    }
+    
+    parts = Array.isArray(parts) ? parts : [parts];
+    const content: Content = {
+      role: "user",
+      parts,
+    };
+
+    const clientContentRequest: ClientContentMessage = {
+      clientContent: {
+        turns: [content],
+        turnComplete,
+      },
+    };
+
+    try {
+      this.session.sendClientContent({
+        turns: [content],
+        turnComplete
+      });
+      this.log('client.send', clientContentRequest);
+    } catch (error) {
+      console.error('Error sending content:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 保留兼容性方法，现在通过 Session 的特定方法实现
+   */
+  _sendDirect(request: object) {
+    if (!this.session) {
+      throw new Error("Session is not connected");
+    }
+    
+    // 根据请求类型调用适当的会话方法
+    if ('clientContent' in request) {
+      const { clientContent } = request as ClientContentMessage;
+      this.session.sendClientContent(clientContent);
+    } else if ('realtimeInput' in request) {
+      const { realtimeInput } = request as RealtimeInputMessage;
+      this.session.sendRealtimeInput(realtimeInput);
+    } else if ('toolResponse' in request) {
+      const { toolResponse } = request as ToolResponseMessage;
+      this.session.sendToolResponse(toolResponse);
+    } else if ('setup' in request) {
+      // Setup is handled automatically by connect()
+      console.log('Setup is handled automatically by connect()');
+    } else {
+      console.warn('Unknown request type:', request);
+    }
+  }
+}

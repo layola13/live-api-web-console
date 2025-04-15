@@ -15,7 +15,7 @@
  */
 
 import { create } from "zustand";
-import { StreamingLog } from "../multimodal-live-types";
+import { StreamingLog } from "./multimodal-live-client";
 import { mockLogs } from "../components/logger/mock-logs";
 
 interface StoreLoggerState {

@@ -18,10 +18,10 @@ import type {
   Content,
   FunctionCall,
   GenerationConfig,
-  GenerativeContentBlob,
   Part,
   Tool,
-} from "@google/generative-ai";
+  Blob as GenerativeContentBlob
+} from "@google/genai";
 
 /**
  * this module contains type-definitions and Type-Guards

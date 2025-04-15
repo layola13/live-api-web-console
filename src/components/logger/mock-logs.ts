@@ -14,10 +14,12 @@
  * limitations under the License.
  */
 
+import { StreamingLog } from "../../lib/multimodal-live-client";
+
 /**
  * this module is just mock data, intended to make it easier to develop and style the logger
  */
-import type { StreamingLog } from "../../multimodal-live-types";
+
 
 const soundLogs = (n: number): StreamingLog[] =>
   new Array(n).fill(0).map(

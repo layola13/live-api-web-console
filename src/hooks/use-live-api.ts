@@ -16,13 +16,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  MultimodalLiveAPIClientConnection,
+  LiveConfig,
   MultimodalLiveClient,
 } from "../lib/multimodal-live-client";
-import { LiveConfig } from "../multimodal-live-types";
 import { AudioStreamer } from "../lib/audio-streamer";
 import { audioContext } from "../lib/utils";
 import VolMeterWorket from "../lib/worklets/vol-meter";
+
+export type MultimodalLiveAPIClientConnection = {
+  url?: string; // 保留此属性以保持向后兼容
+  apiKey: string;
+};
 
 export type UseLiveAPIResults = {
   client: MultimodalLiveClient;
@@ -35,12 +39,11 @@ export type UseLiveAPIResults = {
 };
 
 export function useLiveAPI({
-  url,
   apiKey,
 }: MultimodalLiveAPIClientConnection): UseLiveAPIResults {
   const client = useMemo(
-    () => new MultimodalLiveClient({ url, apiKey }),
-    [url, apiKey],
+    () => new MultimodalLiveClient({ apiKey }),
+    [apiKey], // 移除不必要的 url 依赖
   );
   const audioStreamerRef = useRef<AudioStreamer | null>(null);
 
