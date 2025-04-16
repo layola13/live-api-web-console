@@ -1,0 +1,44 @@
+_simple/examples/proxy-client.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gemini Live API Client</title>
+  <link rel="stylesheet" href="proxy-client.css">
+</head>
+<body>
+  <h1>Gemini Live API Chat</h1>
+  
+  <div id="login-form">
+    <h2>Login</h2>
+    <input type="text" id="username" placeholder="Username">
+    <button id="login-btn">Get Token</button>
+  </div>
+  
+  <div id="chat-interface" style="display: none;">
+    <div class="chat-container" id="chat-container"></div>
+    
+    <div class="input-area">
+      <input type="text" id="message-input" placeholder="Type your message...">
+      <button id="send-btn" disabled>Send</button>
+    </div>
+    
+    <div class="controls">
+      <button id="connect-btn">Connect</button>
+      <button id="disconnect-btn" disabled>Disconnect</button>
+      <button id="record-btn" disabled>Record Audio</button>
+      <button id="stop-record-btn" disabled style="display: none;">Stop Recording</button>
+    </div>
+    
+    <div class="volume-meter">
+      <div class="volume-level" id="volume-level"></div>
+    </div>
+    
+    <div class="status" id="status">Not connected</div>
+  </div>
+  
+  <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+  <script type="module" src="proxy-client.js"></script>
+</body>
+</html>

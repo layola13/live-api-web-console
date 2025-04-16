@@ -1,0 +1,362 @@
+client.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gemini Live API Client</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    
+    .chat-container {
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      padding: 10px;
+      height: 400px;
+      overflow-y: auto;
+      margin-bottom: 10px;
+    }
+    
+    .user-message {
+      background-color: #e6f7ff;
+      padding: 8px 12px;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      max-width: 70%;
+      align-self: flex-end;
+      margin-left: auto;
+    }
+    
+    .model-message {
+      background-color: #f2f2f2;
+      padding: 8px 12px;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      max-width: 70%;
+    }
+    
+    .input-area {
+      display: flex;
+    }
+    
+    #message-input {
+      flex-grow: 1;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    
+    button {
+      margin-left: 8px;
+      padding: 8px 16px;
+      background-color: #4caf50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    
+    button:hover {
+      background-color: #45a049;
+    }
+    
+    button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+    
+    .controls {
+      margin-top: 10px;
+      display: flex;
+      gap: 10px;
+    }
+    
+    .status {
+      margin-top: 10px;
+      font-style: italic;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <h1>Gemini Live API Chat</h1>
+  
+  <div id="login-form">
+    <h2>Login</h2>
+    <input type="text" id="username" placeholder="Username">
+    <button id="login-btn">Get Token</button>
+  </div>
+  
+  <div id="chat-interface" style="display: none;">
+    <div class="chat-container" id="chat-container"></div>
+    
+    <div class="input-area">
+      <input type="text" id="message-input" placeholder="Type your message...">
+      <button id="send-btn" disabled>Send</button>
+    </div>
+    
+    <div class="controls">
+      <button id="connect-btn">Connect</button>
+      <button id="disconnect-btn" disabled>Disconnect</button>
+      <button id="record-btn" disabled>Record Audio</button>
+      <button id="stop-record-btn" disabled style="display: none;">Stop Recording</button>
+    </div>
+    
+    <div class="status" id="status">Not connected</div>
+  </div>
+  
+  <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+  <script>
+    // Configuration
+    const API_URL = 'http://localhost:3000';
+    let socket;
+    let token;
+    let recording = false;
+    let mediaRecorder;
+    let audioChunks = [];
+    
+    // DOM Elements
+    const loginForm = document.getElementById('login-form');
+    const chatInterface = document.getElementById('chat-interface');
+    const usernameInput = document.getElementById('username');
+    const loginBtn = document.getElementById('login-btn');
+    const chatContainer = document.getElementById('chat-container');
+    const messageInput = document.getElementById('message-input');
+    const sendBtn = document.getElementById('send-btn');
+    const connectBtn = document.getElementById('connect-btn');
+    const disconnectBtn = document.getElementById('disconnect-btn');
+    const recordBtn = document.getElementById('record-btn');
+    const stopRecordBtn = document.getElementById('stop-record-btn');
+    const statusElement = document.getElementById('status');
+    
+    // Login and get token
+    loginBtn.addEventListener('click', async () => {
+      const username = usernameInput.value.trim();
+      if (!username) {
+        alert('Please enter a username');
+        return;
+      }
+      
+      try {
+        const response = await fetch(`${API_URL}/api/token`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ username })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+          token = data.token;
+          loginForm.style.display = 'none';
+          chatInterface.style.display = 'block';
+          updateStatus('Got token, ready to connect');
+        } else {
+          alert(`Error: ${data.error}`);
+        }
+      } catch (error) {
+        alert(`Network error: ${error.message}`);
+      }
+    });
+    
+    // Connect to Gemini API via proxy
+    connectBtn.addEventListener('click', () => {
+      if (!token) {
+        updateStatus('No token available');
+        return;
+      }
+      
+      // Initialize Socket.io connection
+      socket = io(API_URL, {
+        auth: { token }
+      });
+      
+      // Socket event handlers
+      socket.on('connect', () => {
+        updateStatus('Socket connected, establishing Gemini session...');
+        
+        // Configure and connect to Gemini
+        socket.emit('connect_gemini', {
+          model: 'gemini-2.0-flash-live-001',
+          generationConfig: {
+            temperature: 0.7,
+            responseModalities: ['TEXT', 'AUDIO'],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: {
+                  voiceName: 'en-default',
+                },
+              },
+              languageCode: 'en-US',
+            }
+          }
+        });
+      });
+      
+      socket.on('connected', () => {
+        updateStatus('Connected to Gemini');
+        connectBtn.disabled = true;
+        disconnectBtn.disabled = false;
+        sendBtn.disabled = false;
+        recordBtn.disabled = false;
+      });
+      
+      socket.on('content', (modelTurn) => {
+        const parts = modelTurn.modelTurn.parts;
+        parts.forEach(part => {
+          if (part.text) {
+            addMessage('model', part.text);
+          }
+        });
+      });
+      
+      socket.on('audio', (audioBase64) => {
+        // Convert base64 to audio and play it
+        const audioData = atob(audioBase64);
+        const arrayBuffer = new ArrayBuffer(audioData.length);
+        const view = new Uint8Array(arrayBuffer);
+        for (let i = 0; i < audioData.length; i++) {
+          view[i] = audioData.charCodeAt(i);
+        }
+        
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        audioContext.decodeAudioData(arrayBuffer, (buffer) => {
+          const source = audioContext.createBufferSource();
+          source.buffer = buffer;
+          source.connect(audioContext.destination);
+          source.start(0);
+        });
+      });
+      
+      socket.on('log', (log) => {
+        console.log(`[${new Date(log.date).toLocaleTimeString()}] ${log.type}:`, log.message);
+      });
+      
+      socket.on('turncomplete', () => {
+        updateStatus('Model turn complete');
+      });
+      
+      socket.on('close', () => {
+        updateStatus('Disconnected from Gemini');
+        resetUI();
+      });
+      
+      socket.on('error', (error) => {
+        updateStatus(`Error: ${error.message}`);
+        console.error('Error details:', error.details);
+      });
+      
+      socket.on('disconnect', () => {
+        updateStatus('Disconnected from server');
+        resetUI();
+      });
+    });
+    
+    // Send text message
+    sendBtn.addEventListener('click', () => {
+      const message = messageInput.value.trim();
+      if (!message) return;
+      
+      addMessage('user', message);
+      
+      socket.emit('send_text', {
+        parts: [{ text: message }],
+        turnComplete: true
+      });
+      
+      messageInput.value = '';
+      updateStatus('Waiting for response...');
+    });
+    
+    // Disconnect from Gemini
+    disconnectBtn.addEventListener('click', () => {
+      if (socket) {
+        socket.emit('disconnect_gemini');
+      }
+    });
+    
+    // Record audio
+    recordBtn.addEventListener('click', async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        mediaRecorder = new MediaRecorder(stream);
+        audioChunks = [];
+        
+        mediaRecorder.ondataavailable = (event) => {
+          audioChunks.push(event.data);
+        };
+        
+        mediaRecorder.onstop = async () => {
+          const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+          const reader = new FileReader();
+          
+          reader.onloadend = () => {
+            const base64data = reader.result.split(',')[1];
+            
+            // Send audio to server
+            socket.emit('send_audio', base64data);
+            updateStatus('Audio sent, waiting for response...');
+          };
+          
+          reader.readAsDataURL(audioBlob);
+          
+          // Reset recording UI
+          recording = false;
+          recordBtn.style.display = 'inline-block';
+          stopRecordBtn.style.display = 'none';
+        };
+        
+        // Start recording
+        mediaRecorder.start();
+        recording = true;
+        recordBtn.style.display = 'none';
+        stopRecordBtn.style.display = 'inline-block';
+        stopRecordBtn.disabled = false;
+        updateStatus('Recording...');
+        
+      } catch (error) {
+        alert(`Error accessing microphone: ${error.message}`);
+      }
+    });
+    
+    // Stop recording
+    stopRecordBtn.addEventListener('click', () => {
+      if (mediaRecorder && recording) {
+        mediaRecorder.stop();
+        stopRecordBtn.disabled = true;
+      }
+    });
+    
+    // Helper functions
+    function addMessage(sender, text) {
+      const messageElement = document.createElement('div');
+      messageElement.classList.add(sender === 'user' ? 'user-message' : 'model-message');
+      messageElement.textContent = text;
+      chatContainer.appendChild(messageElement);
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+    
+    function updateStatus(message) {
+      statusElement.textContent = message;
+    }
+    
+    function resetUI() {
+      connectBtn.disabled = false;
+      disconnectBtn.disabled = true;
+      sendBtn.disabled = true;
+      recordBtn.disabled = true;
+      stopRecordBtn.disabled = true;
+      stopRecordBtn.style.display = 'none';
+      recordBtn.style.display = 'inline-block';
+    }
+  </script>
+</body>
+</html>

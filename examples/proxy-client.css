@@ -1,0 +1,90 @@
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+  
+  .chat-container {
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    padding: 10px;
+    height: 400px;
+    overflow-y: auto;
+    margin-bottom: 10px;
+  }
+  
+  .user-message {
+    background-color: #e6f7ff;
+    padding: 8px 12px;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    max-width: 70%;
+    align-self: flex-end;
+    margin-left: auto;
+  }
+  
+  .model-message {
+    background-color: #f2f2f2;
+    padding: 8px 12px;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    max-width: 70%;
+  }
+  
+  .input-area {
+    display: flex;
+  }
+  
+  #message-input {
+    flex-grow: 1;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+  }
+  
+  button {
+    margin-left: 8px;
+    padding: 8px 16px;
+    background-color: #4caf50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  
+  button:hover {
+    background-color: #45a049;
+  }
+  
+  button:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
+  }
+  
+  .controls {
+    margin-top: 10px;
+    display: flex;
+    gap: 10px;
+  }
+  
+  .status {
+    margin-top: 10px;
+    font-style: italic;
+    color: #666;
+  }
+  
+  .volume-meter {
+    height: 10px;
+    background-color: #f0f0f0;
+    border-radius: 5px;
+    margin-top: 10px;
+    overflow: hidden;
+  }
+  
+  .volume-level {
+    height: 100%;
+    width: 0%;
+    background-color: #4caf50;
+    transition: width 0.1s ease;
+  }
